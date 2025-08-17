@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+httpx
+python-jose[cryptography]
+supabase
+python-dotenv
+transformers
+sentence-transformers
+faiss-cpu
+torch
+accelerate
+tqdm
