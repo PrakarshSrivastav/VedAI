@@ -15,10 +15,11 @@ load_dotenv()
 # Config
 # -----------------------
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-GENERATION_MODEL_NAME = "gemini-1.5-flash"  # Or another suitable Gemini model
+GENERATION_MODEL_NAME = "gemini-2.0-flash-lite"  # Lighter model with different quota
 
-FAISS_INDEX_PATH = "faiss_index.index"
-METADATA_PATH = "metadata.pkl"
+script_dir = os.path.dirname(os.path.abspath(__file__))
+FAISS_INDEX_PATH = os.path.join(script_dir, "faiss_index.index")
+METADATA_PATH = os.path.join(script_dir, "metadata.pkl")
 
 TOP_K = 5
 MAX_NEW_TOKENS = 512
@@ -86,6 +87,30 @@ class GitaRAG:
         except Exception as e:
             return f"An error occurred during generation: {e}"
 
+    def answer(self, query: str) -> dict:
+        """Return answer and context for API responses."""
+        verses = self.retrieve(query)
+        prompt = self.build_prompt(query, verses)
+
+        try:
+            response = self.generator.generate_content(prompt)
+            answer_text = response.text
+        except Exception as e:
+            answer_text = f"An error occurred during generation: {e}"
+
+        context = [
+            {
+                "chapter_number": str(v["chapter_number"]),
+                "chapter_verse": str(v["chapter_verse"]),
+                "translation": v["translation"],
+            }
+            for v in verses
+        ]
+        return {"answer": answer_text, "context": context}
+
+
+# Create module-level instance for import
+rag = GitaRAG()
 
 # ------------- CLI test -############
 if __name__ == "__main__":
