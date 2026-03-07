@@ -3,7 +3,7 @@ import os
 import faiss
 import pickle
 import numpy as np
-import google.generativeai as genai
+from openai import OpenAI
 from dotenv import load_dotenv
 
 from sentence_transformers import SentenceTransformer
@@ -15,7 +15,7 @@ load_dotenv()
 # Config
 # -----------------------
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-GENERATION_MODEL_NAME = "gemini-2.0-flash-lite"  # Lighter model with different quota
+GENERATION_MODEL_NAME = "llama-3.3-70b-versatile"
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 FAISS_INDEX_PATH = os.path.join(script_dir, "faiss_index.index")
@@ -26,15 +26,17 @@ MAX_NEW_TOKENS = 512
 TEMPERATURE = 0.7
 TOP_P = 0.9
 
-# Read Gemini API key from env
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 class GitaRAG:
     def __init__(self):
-        if not GEMINI_API_KEY:
-            raise ValueError("GEMINI_API_KEY environment variable not set.")
+        if not GROQ_API_KEY:
+            raise ValueError("GROQ_API_KEY environment variable not set.")
 
-        genai.configure(api_key=GEMINI_API_KEY)
+        self.client = OpenAI(
+            base_url="https://api.groq.com/openai/v1",
+            api_key=GROQ_API_KEY,
+        )
 
         print("🔍 Loading FAISS index...")
         self.index = faiss.read_index(FAISS_INDEX_PATH)
@@ -46,19 +48,9 @@ class GitaRAG:
         print("🔤 Loading embedding model...")
         self.embedder = SentenceTransformer(EMBEDDING_MODEL_NAME)
 
-        print(f"🧠 Configuring Gemini generator: {GENERATION_MODEL_NAME}")
-        self.generator = genai.GenerativeModel(
-            model_name=GENERATION_MODEL_NAME,
-            generation_config={
-                "temperature": TEMPERATURE,
-                "top_p": TOP_P,
-                "max_output_tokens": MAX_NEW_TOKENS,
-            },
-        )
-
+        print(f"🧠 Using Groq model: {GENERATION_MODEL_NAME}")
         print("✅ RAG pipeline ready.")
 
-    # ------------- RAG core -############
     def retrieve(self, query: str):
         """Embed query and return top-k verses (metadata)."""
         query_embedding = self.embedder.encode(query, convert_to_numpy=True)
@@ -67,34 +59,44 @@ class GitaRAG:
 
     def build_prompt(self, query: str, verses):
         """Create the prompt to keep the model grounded in the Gita."""
-        prompt = (
-            "You are a wise assistant that answers strictly using the teachings of the Bhagavad Gita.\n\n"
-            "Relevant verses:\n"
-        )
+        context = "Relevant verses:\n"
         for v in verses:
             ref = f"Chapter {v['chapter_number']}, Verse {v['chapter_verse']}"
-            prompt += f"- ({ref}): {v['translation']}\n"
-        prompt += f"\nQuestion: {query}\nAnswer (base it ONLY on the verses above):"
-        return prompt
+            context += f"- ({ref}): {v['translation']}\n"
+        return context, f"Question: {query}\nAnswer (base it ONLY on the verses above):"
+
+    def _call_llm(self, query: str, verses) -> str:
+        context, user_message = self.build_prompt(query, verses)
+        response = self.client.chat.completions.create(
+            model=GENERATION_MODEL_NAME,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a wise assistant that answers strictly using the teachings of the Bhagavad Gita.\n\n" + context,
+                },
+                {
+                    "role": "user",
+                    "content": user_message,
+                },
+            ],
+            max_tokens=MAX_NEW_TOKENS,
+            temperature=TEMPERATURE,
+            top_p=TOP_P,
+        )
+        return response.choices[0].message.content
 
     def generate_answer(self, query: str) -> str:
         verses = self.retrieve(query)
-        prompt = self.build_prompt(query, verses)
-
         try:
-            response = self.generator.generate_content(prompt)
-            return response.text
+            return self._call_llm(query, verses)
         except Exception as e:
             return f"An error occurred during generation: {e}"
 
     def answer(self, query: str) -> dict:
         """Return answer and context for API responses."""
         verses = self.retrieve(query)
-        prompt = self.build_prompt(query, verses)
-
         try:
-            response = self.generator.generate_content(prompt)
-            answer_text = response.text
+            answer_text = self._call_llm(query, verses)
         except Exception as e:
             answer_text = f"An error occurred during generation: {e}"
 
@@ -112,7 +114,7 @@ class GitaRAG:
 # Create module-level instance for import
 rag = GitaRAG()
 
-# ------------- CLI test -############
+# ------------- CLI test -------------
 if __name__ == "__main__":
     try:
         rag = GitaRAG()
