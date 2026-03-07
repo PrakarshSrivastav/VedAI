@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect } from "react"
+import { useRouter } from "next/router"
+import { supabase } from "../lib/supabaseClient"
 
 interface Message {
   id: string
@@ -22,13 +24,18 @@ const mockResponses: Record<string, { answer: string; context: { chapter_number:
 async function queryBackend(question: string): Promise<{ answer: string; context: Message["context"] }> {
   // Try real backend first
   try {
+    const { data: { session } } = await supabase.auth.getSession()
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    }
+    
+    if (session?.access_token) {
+      headers["Authorization"] = `Bearer ${session.access_token}`
+    }
+
     const res = await fetch("http://localhost:8000/query", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        // Add auth header when Supabase is configured
-        // "Authorization": `Bearer ${token}`
-      },
+      headers,
       body: JSON.stringify({ question })
     })
     if (res.ok) {
@@ -47,7 +54,22 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [isLoading, setIsLoading] = useState(false)
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const router = useRouter()
+
+  useEffect(() => {
+    const checkUser = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        router.push("/auth/login")
+      } else {
+        setIsCheckingAuth(false)
+      }
+    }
+    
+    checkUser()
+  }, [router])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -88,11 +110,34 @@ export default function ChatPage() {
     }
   }
 
+  if (isCheckingAuth) {
+    return (
+      <div style={styles.loadingContainer}>
+        <div style={styles.loadingDots}>
+          <span>●</span><span>●</span><span>●</span>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div style={styles.container}>
       <header style={styles.header}>
-        <h1 style={styles.title}>VedAI</h1>
-        <p style={styles.subtitle}>Ask questions about the Bhagavad Gita</p>
+        <div style={styles.headerContent}>
+          <div>
+            <h1 style={styles.title}>VedAI</h1>
+            <p style={styles.subtitle}>Ask questions about the Bhagavad Gita</p>
+          </div>
+          <button 
+            style={styles.logoutBtn}
+            onClick={async () => {
+              await supabase.auth.signOut()
+              router.push("/auth/login")
+            }}
+          >
+            Logout
+          </button>
+        </div>
       </header>
 
       <main style={styles.chatContainer}>
@@ -212,7 +257,14 @@ const styles: Record<string, React.CSSProperties> = {
   header: {
     padding: "16px 24px",
     borderBottom: "1px solid #2a2a2a",
-    textAlign: "center",
+  },
+  headerContent: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    maxWidth: "1200px",
+    margin: "0 auto",
+    width: "100%",
   },
   title: {
     fontSize: "24px",
@@ -224,6 +276,15 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "14px",
     color: "#888",
     marginTop: "4px",
+  },
+  logoutBtn: {
+    padding: "8px 16px",
+    backgroundColor: "transparent",
+    color: "#888",
+    border: "1px solid #333",
+    borderRadius: "8px",
+    cursor: "pointer",
+    fontSize: "14px",
   },
   chatContainer: {
     flex: 1,
@@ -339,6 +400,13 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "20px",
     color: "#f59e0b",
   },
+  loadingContainer: {
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    height: "100vh",
+    backgroundColor: "#0f0f0f",
+  },
   inputForm: {
     display: "flex",
     gap: "12px",
@@ -367,3 +435,4 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
   },
 }
+
