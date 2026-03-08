@@ -55,21 +55,27 @@ export default function ChatPage() {
   const [input, setInput] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [isCheckingAuth, setIsCheckingAuth] = useState(true)
+  const [session, setSession] = useState<any>(null)
+  const [freePromptsUsed, setFreePromptsUsed] = useState(0)
+  
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
 
   useEffect(() => {
     const checkUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) {
-        router.push("/auth/login")
-      } else {
-        setIsCheckingAuth(false)
-      }
+      const { data: { session: currentSession } } = await supabase.auth.getSession()
+      setSession(currentSession)
+      setIsCheckingAuth(false)
     }
     
     checkUser()
-  }, [router])
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+    })
+
+    return () => subscription.unsubscribe()
+  }, [])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -78,6 +84,15 @@ export default function ChatPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!input.trim() || isLoading) return
+
+    // Auth & Rate Limit Check
+    if (!session && freePromptsUsed >= 1) {
+      const shouldLogin = window.confirm("You've used your free prompt. Please log in to continue your journey of wisdom.")
+      if (shouldLogin) {
+        router.push("/auth/login")
+      }
+      return
+    }
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -88,6 +103,10 @@ export default function ChatPage() {
     setMessages(prev => [...prev, userMessage])
     setInput("")
     setIsLoading(true)
+
+    if (!session) {
+      setFreePromptsUsed(prev => prev + 1)
+    }
 
     try {
       const response = await queryBackend(userMessage.content)
@@ -128,15 +147,24 @@ export default function ChatPage() {
             <h1 style={styles.title}>VedAI</h1>
             <p style={styles.subtitle}>Ask questions about the Bhagavad Gita</p>
           </div>
-          <button 
-            style={styles.logoutBtn}
-            onClick={async () => {
-              await supabase.auth.signOut()
-              router.push("/auth/login")
-            }}
-          >
-            Logout
-          </button>
+          {session ? (
+            <button 
+              style={styles.logoutBtn}
+              onClick={async () => {
+                await supabase.auth.signOut()
+                router.push("/auth/login")
+              }}
+            >
+              Logout
+            </button>
+          ) : (
+            <button 
+              style={styles.loginBtn}
+              onClick={() => router.push("/auth/login")}
+            >
+              Sign In
+            </button>
+          )}
         </div>
       </header>
 
@@ -145,6 +173,9 @@ export default function ChatPage() {
           <div style={styles.emptyState}>
             <div style={styles.emptyIcon}>🙏</div>
             <h2 style={styles.emptyTitle}>Welcome to VedAI</h2>
+            {!session && (
+              <p style={styles.freePromptBadge}>Try one free prompt without an account</p>
+            )}
             <p style={styles.emptyText}>
               Ask any question about the Bhagavad Gita and receive wisdom from the sacred text.
             </p>
@@ -285,6 +316,26 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "8px",
     cursor: "pointer",
     fontSize: "14px",
+  },
+  loginBtn: {
+    padding: "8px 20px",
+    backgroundColor: "#f59e0b",
+    color: "#000",
+    border: "none",
+    borderRadius: "8px",
+    cursor: "pointer",
+    fontSize: "14px",
+    fontWeight: "600",
+  },
+  freePromptBadge: {
+    backgroundColor: "rgba(245, 158, 11, 0.1)",
+    color: "#f59e0b",
+    padding: "4px 12px",
+    borderRadius: "16px",
+    fontSize: "12px",
+    fontWeight: "500",
+    marginBottom: "16px",
+    border: "1px solid rgba(245, 158, 11, 0.2)",
   },
   chatContainer: {
     flex: 1,
