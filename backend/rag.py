@@ -59,44 +59,52 @@ class GitaRAG:
 
     def build_prompt(self, query: str, verses):
         """Create the prompt to keep the model grounded in the Gita."""
-        context = "Relevant verses:\n"
+        context = "Relevant verses for reference:\n"
         for v in verses:
             ref = f"Chapter {v['chapter_number']}, Verse {v['chapter_verse']}"
             context += f"- ({ref}): {v['translation']}\n"
-        return context, f"Question: {query}\nAnswer (base it ONLY on the verses above):"
+        return context, f"Question: {query}"
 
-    def _call_llm(self, query: str, verses) -> str:
+    def _call_llm(self, query: str, verses, history: list = []) -> str:
         context, user_message = self.build_prompt(query, verses)
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                        "You are a wise, thoughtful guide well-versed in the Bhagavad Gita. "
+                        "Answer in your own words with depth and insight, drawing on your full understanding of the Gita's teachings. "
+                        "Use the provided verses as citations to support your answer — weave them in naturally, don't just quote them. "
+                        "If the conversation has prior context, build on it meaningfully.\n\n"
+                        + context
+                    ),
+            },
+            *history,
+            {
+                "role": "user",
+                "content": user_message,
+            },
+        ]
         response = self.client.chat.completions.create(
             model=GENERATION_MODEL_NAME,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a wise assistant that answers strictly using the teachings of the Bhagavad Gita.\n\n" + context,
-                },
-                {
-                    "role": "user",
-                    "content": user_message,
-                },
-            ],
+            messages=messages,
             max_tokens=MAX_NEW_TOKENS,
             temperature=TEMPERATURE,
             top_p=TOP_P,
         )
         return response.choices[0].message.content
 
-    def generate_answer(self, query: str) -> str:
+    def generate_answer(self, query: str, history: list = []) -> str:
         verses = self.retrieve(query)
         try:
-            return self._call_llm(query, verses)
+            return self._call_llm(query, verses, history)
         except Exception as e:
             return f"An error occurred during generation: {e}"
 
-    def answer(self, query: str) -> dict:
+    def answer(self, query: str, history: list = []) -> dict:
         """Return answer and context for API responses."""
         verses = self.retrieve(query)
         try:
-            answer_text = self._call_llm(query, verses)
+            answer_text = self._call_llm(query, verses, history)
         except Exception as e:
             answer_text = f"An error occurred during generation: {e}"
 

@@ -21,8 +21,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
 class QueryRequest(BaseModel):
     question: str
+    history: List[ChatMessage] = []
 
 class QueryResponse(BaseModel):
     answer: str
@@ -53,7 +58,8 @@ async def health():
 @app.post("/query", response_model=QueryResponse)
 async def query(req: QueryRequest, user_id: Optional[str] = Depends(get_optional_user)):
     """Query the Gita RAG. Works without auth for testing."""
-    result = rag.answer(req.question)
+    history = [{"role": m.role, "content": m.content} for m in req.history]
+    result = rag.answer(req.question, history)
 
     # Only persist chat if user is authenticated and Supabase is configured
     if user_id and os.getenv("SUPABASE_URL"):

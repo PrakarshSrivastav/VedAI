@@ -21,22 +21,24 @@ const mockResponses: Record<string, { answer: string; context: { chapter_number:
   }
 }
 
-async function queryBackend(question: string): Promise<{ answer: string; context: Message["context"] }> {
+async function queryBackend(question: string, history: Message[]): Promise<{ answer: string; context: Message["context"] }> {
   // Try real backend first
   try {
     const { data: { session } } = await supabase.auth.getSession()
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     }
-    
+
     if (session?.access_token) {
       headers["Authorization"] = `Bearer ${session.access_token}`
     }
 
+    const chatHistory = history.map(m => ({ role: m.role, content: m.content }))
+
     const res = await fetch("http://localhost:8000/query", {
       method: "POST",
       headers,
-      body: JSON.stringify({ question })
+      body: JSON.stringify({ question, history: chatHistory })
     })
     if (res.ok) {
       return await res.json()
@@ -109,7 +111,7 @@ export default function ChatPage() {
     }
 
     try {
-      const response = await queryBackend(userMessage.content)
+      const response = await queryBackend(userMessage.content, messages)
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
